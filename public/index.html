@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>VISOR Custody Monitor - Oregon Constitutional Right to Notification</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * { box-sizing: border-box; }
+        
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            max-width: 1200px; 
+            margin: 0 auto; 
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        h1 { 
+            color: #1a1a1a; 
+            margin-top: 0;
+            font-size: 28px;
+        }
+        
+        .disclaimer { 
+            background: #e8f4f8; 
+            padding: 20px; 
+            border-left: 4px solid #0277bd; 
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        
+        .disclaimer h3 {
+            margin-top: 0;
+            color: #0277bd;
+        }
+        
+        .search-box {
+            margin: 30px 0;
+            padding: 20px;
+            background: #f9f9f9;
+            border-radius: 4px;
+        }
+        
+        input[type="text"] { 
+            padding: 12px; 
+            margin: 5px; 
+            font-size: 16px;
+            width: 100%;
+            max-width: 500px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        
+        button { 
+            padding: 12px 24px; 
+            margin: 5px; 
+            font-size: 16px;
+            background: #0277bd;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        
+        button:hover { 
+            background: #01579b;
+        }
+        
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        .error {
+            background: #ffebee;
+            border: 1px solid #ef5350;
+            color: #c62828;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        
+        .success {
+            background: #e8f5e9;
+            border: 1px solid #66bb6a;
+            color: #2e7d32;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        
+        table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            margin: 20px 0;
+            background: white;
+        }
+        
+        th, td { 
+            border: 1px solid #e0e0e0; 
+            padding: 12px; 
+            text-align: left;
+        }
+        
+        th { 
+            background: #424242; 
+            color: white;
+            font-weight: 600;
+        }
+        
+        tr:nth-child(even) {
+            background: #f9f9f9;
+        }
+        
+        .out-of-custody { 
+            background: #fff9c4 !important; 
+            border-left: 4px solid #fbc02d;
+            font-weight: 600;
+            text-align: center;
+        }
+        
+        .in-custody-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            background: #ef5350;
+            color: white;
+            border-radius: 3px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .released-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            background: #66bb6a;
+            color: white;
+            border-radius: 3px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .summary {
+            background: #f5f5f5;
+            padding: 20px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        
+        .summary h3 {
+            margin-top: 0;
+        }
+        
+        .stat {
+            display: inline-block;
+            margin: 10px 20px 10px 0;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+        }
+        
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #1a1a1a;
+        }
+        
+        .help-text {
+            color: #666;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+        
+        footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #e0e0e0;
+            color: #666;
+            font-size: 14px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 VISOR Custody History Monitor</h1>
+        
+        <div class="disclaimer">
+            <h3>⚖️ Legal Notice - Constitutional Right to Notification</h3>
+            <p><strong>Oregon Constitution, Article I, Section 42(1)(b)</strong> grants crime victims the constitutional right:</p>
+            <blockquote>"To be informed, upon request, when the perpetrator is released from custody or has escaped"</blockquote>
+            <p>This tool accesses publicly available data already transmitted by the Oregon VISOR (Victim Information and Services Online Resources) system. 
+            This tool is provided for personal safety monitoring, victim notification verification, and public accountability auditing purposes.</p>
+            <p><strong>Data Source:</strong> Oregon Department of Corrections - VISOR System (visor.oregon.gov)</p>
+        </div>
+        
+        <div class="search-box">
+            <h3>Enter IIC ID Number</h3>
+            <p class="help-text">
+                The IIC ID is found in the VISOR URL. Example: 
+                <code>https://visor.oregon.gov/iic-info?iicid=<strong>fd8e7c6b-c854-ccc2-6141-5c55e2715fb0</strong></code>
+            </p>
+            <input type="text" id="iicId" placeholder="Enter IIC ID (e.g., fd8e7c6b-c854-ccc2-6141-5c55e2715fb0)">
+            <br>
+            <button onclick="fetchHistory()" id="searchBtn">Get Custody History</button>
+            <button onclick="exportData()" id="exportBtn" disabled>Export to CSV</button>
+        </div>
+        
+        <div id="results"></div>
+        
+        <footer>
+            <p><strong>VISOR Custody Monitor</strong> | Data sourced from Oregon Department of Corrections</p>
+            <p>Questions about VISOR? Call 855-691-6246 (24/7) | Email: VISOR@doc.oregon.gov</p>
+        </footer>
+    </div>
+    
+    <script>
+        let currentData = null;
+        const API_BASE = window.location.origin; // Will use same origin as frontend
+        
+        async function fetchHistory() {
+            const iicId = document.getElementById('iicId').value.trim();
+            const resultsDiv = document.getElementById('results');
+            const searchBtn = document.getElementById('searchBtn');
+            const exportBtn = document.getElementById('exportBtn');
+            
+            if (!iicId) {
+                resultsDiv.innerHTML = '<div class="error">Please enter an IIC ID</div>';
+                return;
+            }
+            
+            // Validate format
+            if (!/^[a-f0-9-]{36}$/i.test(iicId)) {
+                resultsDiv.innerHTML = '<div class="error">Invalid IIC ID format. Should be 36 characters with dashes (e.g., fd8e7c6b-c854-ccc2-6141-5c55e2715fb0)</div>';
+                return;
+            }
+            
+            resultsDiv.innerHTML = '<div class="loading">🔄 Fetching custody history from VISOR...</div>';
+            searchBtn.disabled = true;
+            exportBtn.disabled = true;
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/custody-history/${iicId}`);
+                
+                if (!response.ok) {
+                    throw new Error(`Server returned ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                currentData = data;
+                displayResults(data);
+                exportBtn.disabled = false;
+                
+            } catch (error) {
+                resultsDiv.innerHTML = `<div class="error">
+                    <strong>Error fetching custody history:</strong><br>
+                    ${error.message}
+                </div>`;
+            } finally {
+                searchBtn.disabled = false;
+            }
+        }
+        
+        function formatDate(dateStr) {
+            if (!dateStr) return 'Currently In Custody';
+            const d = new Date(dateStr);
+            return d.toLocaleString('en-US', { 
+                year: 'numeric', 
+                month: 'numeric', 
+                day: 'numeric',
+                hour: 'numeric', 
+                minute: '2-digit', 
+                hour12: true 
+            });
+        }
+        
+        function displayResults(data) {
+            const resultsDiv = document.getElementById('results');
+            
+            if (data.records.length === 0) {
+                resultsDiv.innerHTML = `<div class="error">No custody history found for IIC ID: ${data.iicId}</div>`;
+                return;
+            }
+            
+            // Count custody records (not gaps)
+            const custodyRecords = data.records.filter(r => r.type === 'CUSTODY');
+            
+            let html = '<div class="summary">';
+            html += '<h3>📊 Summary</h3>';
+            html += `<div class="stat"><div class="stat-label">Total Incarcerations</div><div class="stat-value">${custodyRecords.length}</div></div>`;
+            html += `<div class="stat"><div class="stat-label">Current Status</div><div class="stat-value">${data.currentlyInCustody ? '🔒 IN CUSTODY' : '✅ OUT OF CUSTODY'}</div></div>`;
+            html += `<div class="stat"><div class="stat-label">Data Retrieved</div><div class="stat-value">${new Date(data.retrievedAt).toLocaleString()}</div></div>`;
+            html += '</div>';
+            
+            html += `<h3>📋 Complete Custody History (${custodyRecords.length} Records)</h3>`;
+            html += '<table><thead><tr>';
+            html += '<th>Offender Number</th>';
+            html += '<th>Facility</th>';
+            html += '<th>Intake Date</th>';
+            html += '<th>Release Date</th>';
+            html += '<th>Status</th>';
+            html += '</tr></thead><tbody>';
+            
+            data.records.forEach(record => {
+                if (record.type === 'OUT_OF_CUSTODY') {
+                    html += '<tr class="out-of-custody"><td colspan="5">';
+                    html += `⬇️ OUT OF CUSTODY: ${record.days} days, ${record.hours} hours, ${record.minutes} minutes ⬇️`;
+                    html += '</td></tr>';
+                } else {
+                    html += '<tr>';
+                    html += `<td><strong>${record.offenderNumber}</strong></td>`;
+                    html += `<td>${record.facility}</td>`;
+                    html += `<td>${formatDate(record.intakeDate)}</td>`;
+                    html += `<td>${formatDate(record.releaseDate)}</td>`;
+                    html += `<td>${record.currentlyInCustody ? '<span class="in-custody-badge">IN CUSTODY</span>' : '<span class="released-badge">RELEASED</span>'}</td>`;
+                    html += '</tr>';
+                }
+            });
+            
+            html += '</tbody></table>';
+            
+            html += '<div class="success">';
+            html += `<strong>✅ Successfully retrieved ${custodyRecords.length} custody records</strong><br>`;
+            html += `IIC ID: ${data.iicId}`;
+            html += '</div>';
+            
+            resultsDiv.innerHTML = html;
+        }
+        
+        function exportData() {
+            if (!currentData || currentData.records.length === 0) {
+                alert('No data to export. Please fetch custody history first.');
+                return;
+            }
+            
+            let csv = 'Type,Offender Number,Facility,Intake Date,Release Date,Status,Gap Duration\n';
+            
+            currentData.records.forEach(record => {
+                if (record.type === 'OUT_OF_CUSTODY') {
+                    csv += `OUT OF CUSTODY,,,,,"${record.days} days, ${record.hours} hours, ${record.minutes} minutes"\n`;
+                } else {
+                    csv += `CUSTODY,`;
+                    csv += `"${record.offenderNumber}",`;
+                    csv += `"${record.facility}",`;
+                    csv += `"${record.intakeDate || ''}",`;
+                    csv += `"${record.releaseDate || 'Currently In Custody'}",`;
+                    csv += `"${record.currentlyInCustody ? 'IN CUSTODY' : 'RELEASED'}",\n`;
+                }
+            });
+            
+            // Download CSV
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `visor_custody_history_${currentData.iicId}_${new Date().toISOString().split('T')[0]}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+        }
+        
+        // Allow Enter key to search
+        document.getElementById('iicId').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                fetchHistory();
+            }
+        });
+    </script>
+</body>
+</html>
