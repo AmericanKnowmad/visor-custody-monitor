@@ -207,5 +207,3 @@ app.listen(PORT, () => {
     console.log(`VISOR Custody Monitor API running on port ${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
-```
-
