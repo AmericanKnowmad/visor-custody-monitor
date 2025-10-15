@@ -1,4 +1,3 @@
-// server.js - Improved version with better debugging
 const express = require('express');
 const cors = require('cors');
 const fetch = require('node-fetch');
@@ -10,7 +9,100 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
-// Proxy endpoint to fetch VISOR data
+// Helper function to extract custody data from HTML
+function extractCustodyData(html) {
+    console.log('Starting data extraction...');
+    
+    // Strategy 1: Look for the control ID followed by data array
+    const controlIdPattern = /b53c668f-4840-4868-8182-1c0ac0c19dc6[\s\S]{0,1000}"data"\s*:\s*(\[[^\]]*\{[^\}]*"idoc_name"[^\}]*\}[^\]]*\])/;
+    let match = html.match(controlIdPattern);
+    
+    if (match) {
+        console.log('Strategy 1: Found data near control ID');
+        try {
+            return JSON.parse(match[1]);
+        } catch (e) {
+            console.log('Strategy 1 parse failed:', e.message);
+        }
+    }
+    
+    // Strategy 2: Look for any array containing multiple idoc_localnumber records
+    const dataArrayPattern = /\[\s*\{\s*"idoc_name"\s*:\s*"[^"]+"\s*,\s*"idoc_facilityid"[\s\S]{0,500}?\}\s*(?:,\s*\{[\s\S]{0,500}?\})*\s*\]/g;
+    const matches = html.match(dataArrayPattern);
+    
+    if (matches) {
+        console.log(`Strategy 2: Found ${matches.length} potential data arrays`);
+        // Find the longest one (most likely to be the full custody history)
+        let longestArray = null;
+        let maxLength = 0;
+        
+        for (const m of matches) {
+            try {
+                const parsed = JSON.parse(m);
+                if (Array.isArray(parsed) && parsed.length > maxLength && parsed[0].idoc_name) {
+                    longestArray = parsed;
+                    maxLength = parsed.length;
+                }
+            } catch (e) {
+                // Skip invalid JSON
+            }
+        }
+        
+        if (longestArray) {
+            console.log(`Strategy 2: Selected array with ${longestArray.length} records`);
+            return longestArray;
+        }
+    }
+    
+    // Strategy 3: Look for the escaped JSON in script tags or hidden inputs
+    const escapedPattern = /\{&quot;idoc_name&quot;:&quot;[^&]+&quot;[\s\S]{0,500}?\}/g;
+    const escapedMatches = html.match(escapedPattern);
+    
+    if (escapedMatches) {
+        console.log(`Strategy 3: Found ${escapedMatches.length} escaped JSON objects`);
+        try {
+            // Unescape and parse
+            const unescaped = escapedMatches.map(m => 
+                m.replace(/&quot;/g, '"')
+                 .replace(/&amp;/g, '&')
+            );
+            
+            const records = unescaped.map(u => JSON.parse(u)).filter(r => r.idoc_name);
+            
+            if (records.length > 0) {
+                console.log(`Strategy 3: Extracted ${records.length} records from escaped JSON`);
+                return records;
+            }
+        } catch (e) {
+            console.log('Strategy 3 parse failed:', e.message);
+        }
+    }
+    
+    // Strategy 4: Find the GetFormFieldValues response (the API response embedded in HTML)
+    const formFieldPattern = /"formData"\s*:\s*"\{([^"]*(?:\\.[^"]*)*)"/;
+    match = html.match(formFieldPattern);
+    
+    if (match) {
+        console.log('Strategy 4: Found formData field');
+        try {
+            // Unescape the nested JSON
+            const unescaped = match[1]
+                .replace(/\\"/g, '"')
+                .replace(/\\\\/g, '\\');
+            
+            const formData = JSON.parse('{' + unescaped + '}');
+            
+            // Look for any field that might contain the subgrid data
+            console.log('FormData keys:', Object.keys(formData));
+        } catch (e) {
+            console.log('Strategy 4 parse failed:', e.message);
+        }
+    }
+    
+    console.log('All extraction strategies failed');
+    return null;
+}
+
 app.get('/api/custody-history/:iicid', async (req, res) => {
     try {
         const iicId = req.params.iicid;
@@ -37,61 +129,13 @@ app.get('/api/custody-history/:iicid', async (req, res) => {
         const html = await response.text();
         console.log(`Received ${html.length} bytes from VISOR`);
         
-        // VISOR embeds the data in a JSON structure - let's find it more carefully
-        let custodyData = null;
-        
-        // Try to find the fieldResponses with controlDataId b53c668f-4840-4868-8182-1c0ac0c19dc6
-        const fieldResponsesMatch = html.match(/"fieldResponses":\s*(\[[\s\S]*?\])\s*,\s*"formData":/);
-        
-        if (fieldResponsesMatch) {
-            console.log('Found fieldResponses section');
-            try {
-                const fieldResponses = JSON.parse(fieldResponsesMatch[1]);
-                console.log(`Parsed ${fieldResponses.length} field responses`);
-                
-                // Find the one with our control ID
-                const subgridResponse = fieldResponses.find(fr => 
-                    fr.controlDataId === 'b53c668f-4840-4868-8182-1c0ac0c19dc6' &&
-                    fr.gridResponse
-                );
-                
-                if (subgridResponse && subgridResponse.gridResponse.data) {
-                    custodyData = subgridResponse.gridResponse.data;
-                    console.log(`Found custody data: ${custodyData.length} records`);
-                }
-            } catch (parseError) {
-                console.error('Error parsing fieldResponses:', parseError);
-            }
-        }
-        
-        // Fallback: Try original pattern
-        if (!custodyData) {
-            console.log('Trying fallback extraction patterns...');
-            
-            // Pattern: Look for any array with idoc_name entries
-            const dataArrayMatch = html.match(/\[(\{"idoc_name"[^}]+\}(?:,\{"idoc_name"[^}]+\})*)\]/);
-            if (dataArrayMatch) {
-                try {
-                    custodyData = JSON.parse('[' + dataArrayMatch[1] + ']');
-                    console.log(`Fallback pattern found ${custodyData.length} records`);
-                } catch (e) {
-                    console.error('Fallback parse failed:', e);
-                }
-            }
-        }
+        const custodyData = extractCustodyData(html);
         
         if (!custodyData || custodyData.length === 0) {
-            console.error('No custody data extracted');
             return res.json({
                 iicId,
                 records: [],
-                message: 'No custody history found for this IIC ID',
-                debug: {
-                    htmlLength: html.length,
-                    hasFieldResponses: html.includes('fieldResponses'),
-                    hasIdocName: html.includes('idoc_name'),
-                    hasControlId: html.includes('b53c668f-4840-4868-8182-1c0ac0c19dc6')
-                }
+                message: 'No custody history found for this IIC ID'
             });
         }
         
@@ -162,7 +206,7 @@ app.get('/api/custody-history/:iicid', async (req, res) => {
     }
 });
 
-// Enhanced debug endpoint
+// Super detailed debug endpoint
 app.get('/api/debug/:iicid', async (req, res) => {
     try {
         const iicId = req.params.iicid;
@@ -176,22 +220,28 @@ app.get('/api/debug/:iicid', async (req, res) => {
         
         const html = await response.text();
         
-        // Find fieldResponses section
-        const fieldResponsesIdx = html.indexOf('"fieldResponses"');
-        const formDataIdx = html.indexOf('"formData"', fieldResponsesIdx);
+        // Find where idoc_name appears
+        const idocNameIndices = [];
+        let idx = html.indexOf('idoc_name');
+        while (idx !== -1 && idocNameIndices.length < 5) {
+            idocNameIndices.push(idx);
+            idx = html.indexOf('idoc_name', idx + 1);
+        }
         
-        const snippet = fieldResponsesIdx !== -1 && formDataIdx !== -1
-            ? html.substring(fieldResponsesIdx, Math.min(formDataIdx, fieldResponsesIdx + 2000))
-            : 'fieldResponses section not found';
+        // Get snippets around each occurrence
+        const snippets = idocNameIndices.map((index, i) => ({
+            occurrence: i + 1,
+            position: index,
+            before: html.substring(Math.max(0, index - 100), index),
+            match: html.substring(index, index + 50),
+            after: html.substring(index + 50, Math.min(html.length, index + 150))
+        }));
         
         res.json({
             iicId,
             htmlLength: html.length,
-            snippet,
-            hasFieldResponses: html.includes('fieldResponses'),
-            hasGridResponse: html.includes('gridResponse'),
-            hasData: html.includes('"data":['),
-            hasIdocName: html.includes('idoc_name'),
+            idocNameOccurrences: idocNameIndices.length,
+            snippets,
             hasControlId: html.includes('b53c668f-4840-4868-8182-1c0ac0c19dc6')
         });
         
@@ -211,3 +261,4 @@ app.get('/api/health', (req, res) => {
 app.listen(PORT, () => {
     console.log(`VISOR Custody Monitor API running on port ${PORT}`);
 });
+
