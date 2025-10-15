@@ -15,78 +15,83 @@ app.get('/api/custody-history/:iicid', async (req, res) => {
     try {
         const iicId = req.params.iicid;
         
-        // Validate IIC ID format
         if (!/^[a-f0-9-]{36}$/i.test(iicId)) {
             return res.status(400).json({ error: 'Invalid IIC ID format' });
         }
         
         console.log(`[${new Date().toISOString()}] Fetching custody history for IIC ID: ${iicId}`);
         
-        // Fetch the VISOR page
         const visorUrl = `https://visor.oregon.gov/iic-info?iicid=${iicId}`;
         const response = await fetch(visorUrl, {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1'
+                'Accept-Language': 'en-US,en;q=0.5'
             }
         });
         
         if (!response.ok) {
-            console.error(`VISOR returned status ${response.status}`);
             throw new Error(`VISOR returned status ${response.status}`);
         }
         
         const html = await response.text();
         console.log(`Received ${html.length} bytes from VISOR`);
         
-        // Try multiple extraction patterns
+        // VISOR embeds the data in a JSON structure - let's find it more carefully
         let custodyData = null;
         
-        // Pattern 1: Original pattern
-        let match = html.match(/"gridResponse":\s*\{\s*"displayMessage"\s*:\s*null\s*,\s*"errorMessage"\s*:\s*null\s*,\s*"showMessage"\s*:\s*false\s*,\s*"data"\s*:\s*(\[.*?\])\s*,\s*"exportFileName"/s);
+        // Try to find the fieldResponses with controlDataId b53c668f-4840-4868-8182-1c0ac0c19dc6
+        const fieldResponsesMatch = html.match(/"fieldResponses":\s*(\[[\s\S]*?\])\s*,\s*"formData":/);
         
-        if (!match) {
-            // Pattern 2: More flexible pattern
-            match = html.match(/"data"\s*:\s*(\[\{[^}]*"idoc_name"[^}]*\}[^\]]*\])/);
-        }
-        
-        if (!match) {
-            // Pattern 3: Look for the control ID we know exists
-            match = html.match(/"controlDataId"\s*:\s*"b53c668f-4840-4868-8182-1c0ac0c19dc6"[^}]*"gridResponse"[^}]*"data"\s*:\s*(\[[^\]]*\])/);
-        }
-        
-        if (!match) {
-            console.error('Failed to extract custody data with any pattern');
-            console.log('HTML snippet:', html.substring(0, 500));
-            
-            // Check if the page loaded at all
-            if (html.includes('idoc_name')) {
-                console.log('Found idoc_name in HTML, but regex failed');
+        if (fieldResponsesMatch) {
+            console.log('Found fieldResponses section');
+            try {
+                const fieldResponses = JSON.parse(fieldResponsesMatch[1]);
+                console.log(`Parsed ${fieldResponses.length} field responses`);
+                
+                // Find the one with our control ID
+                const subgridResponse = fieldResponses.find(fr => 
+                    fr.controlDataId === 'b53c668f-4840-4868-8182-1c0ac0c19dc6' &&
+                    fr.gridResponse
+                );
+                
+                if (subgridResponse && subgridResponse.gridResponse.data) {
+                    custodyData = subgridResponse.gridResponse.data;
+                    console.log(`Found custody data: ${custodyData.length} records`);
+                }
+            } catch (parseError) {
+                console.error('Error parsing fieldResponses:', parseError);
             }
+        }
+        
+        // Fallback: Try original pattern
+        if (!custodyData) {
+            console.log('Trying fallback extraction patterns...');
             
+            // Pattern: Look for any array with idoc_name entries
+            const dataArrayMatch = html.match(/\[(\{"idoc_name"[^}]+\}(?:,\{"idoc_name"[^}]+\})*)\]/);
+            if (dataArrayMatch) {
+                try {
+                    custodyData = JSON.parse('[' + dataArrayMatch[1] + ']');
+                    console.log(`Fallback pattern found ${custodyData.length} records`);
+                } catch (e) {
+                    console.error('Fallback parse failed:', e);
+                }
+            }
+        }
+        
+        if (!custodyData || custodyData.length === 0) {
+            console.error('No custody data extracted');
             return res.json({
                 iicId,
                 records: [],
-                message: 'No custody history found. The VISOR page may have changed format.',
+                message: 'No custody history found for this IIC ID',
                 debug: {
                     htmlLength: html.length,
+                    hasFieldResponses: html.includes('fieldResponses'),
                     hasIdocName: html.includes('idoc_name'),
-                    hasGridResponse: html.includes('gridResponse')
+                    hasControlId: html.includes('b53c668f-4840-4868-8182-1c0ac0c19dc6')
                 }
-            });
-        }
-        
-        try {
-            custodyData = JSON.parse(match[1]);
-            console.log(`Successfully extracted ${custodyData.length} custody records`);
-        } catch (parseError) {
-            console.error('Failed to parse custody data:', parseError);
-            return res.status(500).json({ 
-                error: 'Failed to parse custody data',
-                details: parseError.message 
             });
         }
         
@@ -97,7 +102,7 @@ app.get('/api/custody-history/:iicid', async (req, res) => {
             return dateA - dateB;
         });
         
-        // Process records and calculate gaps
+        // Process records
         const processedRecords = [];
         for (let i = 0; i < custodyData.length; i++) {
             const record = custodyData[i];
@@ -111,7 +116,7 @@ app.get('/api/custody-history/:iicid', async (req, res) => {
                 currentlyInCustody: !record.idoc_releasedate
             });
             
-            // Calculate gap to next record
+            // Calculate gap
             if (i < custodyData.length - 1 && record.idoc_releasedate) {
                 const nextRecord = custodyData[i + 1];
                 if (nextRecord.savin_intakedate) {
@@ -138,19 +143,18 @@ app.get('/api/custody-history/:iicid', async (req, res) => {
             }
         }
         
-        const result = {
+        console.log(`Successfully processed ${custodyData.length} custody records`);
+        
+        res.json({
             iicId,
             totalRecords: custodyData.length,
             records: processedRecords,
             retrievedAt: new Date().toISOString(),
             currentlyInCustody: custodyData.length > 0 && !custodyData[custodyData.length - 1].idoc_releasedate
-        };
-        
-        console.log(`Returning ${processedRecords.length} total items (including gaps)`);
-        res.json(result);
+        });
         
     } catch (error) {
-        console.error('Error fetching custody history:', error);
+        console.error('Error:', error);
         res.status(500).json({ 
             error: 'Failed to fetch custody history',
             details: error.message 
@@ -158,7 +162,7 @@ app.get('/api/custody-history/:iicid', async (req, res) => {
     }
 });
 
-// Debug endpoint to see raw HTML
+// Enhanced debug endpoint
 app.get('/api/debug/:iicid', async (req, res) => {
     try {
         const iicId = req.params.iicid;
@@ -172,21 +176,23 @@ app.get('/api/debug/:iicid', async (req, res) => {
         
         const html = await response.text();
         
-        // Find the relevant section
-        const startIdx = html.indexOf('"gridResponse"');
-        const endIdx = html.indexOf('"formData"', startIdx);
+        // Find fieldResponses section
+        const fieldResponsesIdx = html.indexOf('"fieldResponses"');
+        const formDataIdx = html.indexOf('"formData"', fieldResponsesIdx);
         
-        const snippet = startIdx !== -1 && endIdx !== -1 
-            ? html.substring(startIdx, endIdx + 200)
-            : 'Grid response section not found';
+        const snippet = fieldResponsesIdx !== -1 && formDataIdx !== -1
+            ? html.substring(fieldResponsesIdx, Math.min(formDataIdx, fieldResponsesIdx + 2000))
+            : 'fieldResponses section not found';
         
         res.json({
             iicId,
             htmlLength: html.length,
             snippet,
+            hasFieldResponses: html.includes('fieldResponses'),
             hasGridResponse: html.includes('gridResponse'),
             hasData: html.includes('"data":['),
-            hasIdocName: html.includes('idoc_name')
+            hasIdocName: html.includes('idoc_name'),
+            hasControlId: html.includes('b53c668f-4840-4868-8182-1c0ac0c19dc6')
         });
         
     } catch (error) {
@@ -194,7 +200,6 @@ app.get('/api/debug/:iicid', async (req, res) => {
     }
 });
 
-// Health check
 app.get('/api/health', (req, res) => {
     res.json({ 
         status: 'ok', 
@@ -205,5 +210,4 @@ app.get('/api/health', (req, res) => {
 
 app.listen(PORT, () => {
     console.log(`VISOR Custody Monitor API running on port ${PORT}`);
-    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
